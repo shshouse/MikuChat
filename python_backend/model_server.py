@@ -1,6 +1,6 @@
 """
 虚拟人物聊天后端服务
-使用 SmolVLM-500M-Instruct 模型
+使用 Qwen2-VL-2B-Instruct 模型
 """
 import os
 import sys
@@ -37,13 +37,13 @@ processor = None
 device = None
 
 # 模型配置
-MODEL_NAME = "Qwen/Qwen3-VL-8B-Instruct"
-MODEL_DISPLAY_NAME = "Qwen3-VL 8B"
+MODEL_NAME = "Qwen/Qwen2-VL-2B-Instruct"
+MODEL_DISPLAY_NAME = "Qwen2-VL 2B"
 MODEL_CACHE_DIR = os.path.join(os.path.dirname(__file__), "models")
 
 # 生成参数配置
 GENERATION_CONFIG = {
-    'max_tokens': 1024,
+    'max_tokens': 512,
     'temperature': 0.7,
     'top_p': 0.9,
     'repetition_penalty': 1.1
@@ -165,51 +165,78 @@ def chat():
             except Exception as e:
                 logger.warning(f"图片处理失败: {str(e)}")
         
-        # 构建消息格式（使用聊天模板）
+        # 构建 Qwen3-VL 的消息格式
         messages = []
         
         # 添加历史消息（限制历史长度以节省内存）
-        for h in history[-6:]:  # 只保留最近3轮对话
+        for h in history[-4:]:  # 只保留最近2轮对话（Qwen3-VL 更占显存）
             if h['role'] == 'user':
                 messages.append({
                     "role": "user",
-                    "content": [{"type": "text", "text": h['content']}]
+                    "content": h['content']
                 })
             elif h['role'] == 'assistant':
                 messages.append({
                     "role": "assistant", 
-                    "content": [{"type": "text", "text": h['content']}]
+                    "content": h['content']
                 })
         
         # 添加当前消息
         if image:
+            # Qwen3-VL 的图片+文本格式
             messages.append({
                 "role": "user",
                 "content": [
-                    {"type": "image"},
+                    {"type": "image", "image": image},
                     {"type": "text", "text": message}
                 ]
             })
         else:
             messages.append({
                 "role": "user",
-                "content": [{"type": "text", "text": message}]
+                "content": message
             })
         
-        # 使用处理器的聊天模板
-        prompt = processor.apply_chat_template(
-            messages, 
-            add_generation_prompt=True,
-            tokenize=False
-        )
-        
-        # 准备输入
-        if image:
-            inputs = processor(text=prompt, images=image, return_tensors="pt").to(device)
-        else:
-            inputs = processor(text=prompt, return_tensors="pt").to(device)
+        # 使用 Qwen3-VL 的聊天模板
+        try:
+            text = processor.apply_chat_template(
+                messages, 
+                tokenize=False,
+                add_generation_prompt=True
+            )
+            
+            # 准备输入
+            if image:
+                inputs = processor(
+                    text=[text],
+                    images=[image],
+                    padding=True,
+                    return_tensors="pt"
+                ).to(device)
+            else:
+                inputs = processor(
+                    text=[text],
+                    padding=True,
+                    return_tensors="pt"
+                ).to(device)
+        except Exception as e:
+            logger.error(f"模板处理失败: {str(e)}")
+            # 降级到简单文本
+            if image:
+                inputs = processor(
+                    text=[f"<|im_start|>user\n{message}<|im_end|>\n<|im_start|>assistant\n"],
+                    images=[image],
+                    return_tensors="pt"
+                ).to(device)
+            else:
+                inputs = processor(
+                    text=[f"<|im_start|>user\n{message}<|im_end|>\n<|im_start|>assistant\n"],
+                    return_tensors="pt"
+                ).to(device)
         
         # 生成回复
+        logger.info(f"开始生成回复，输入 token 数: {inputs['input_ids'].shape}")
+        
         with torch.no_grad():
             generated_ids = model.generate(
                 **inputs,
@@ -217,21 +244,30 @@ def chat():
                 do_sample=True,
                 temperature=GENERATION_CONFIG['temperature'],
                 top_p=GENERATION_CONFIG['top_p'],
-                repetition_penalty=GENERATION_CONFIG['repetition_penalty']
+                repetition_penalty=GENERATION_CONFIG['repetition_penalty'],
+                pad_token_id=processor.tokenizer.pad_token_id,
+                eos_token_id=processor.tokenizer.eos_token_id
             )
         
-        # 解码输出
-        full_response = processor.decode(generated_ids[0], skip_special_tokens=True)
+        # 解码输出（只解码新生成的部分）
+        generated_ids_trimmed = [
+            out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs['input_ids'], generated_ids)
+        ]
         
-        # 提取助手回复部分（移除提示词）
-        if "Assistant:" in full_response:
-            response = full_response.split("Assistant:")[-1].strip()
-        else:
-            response = full_response.strip()
+        response = processor.batch_decode(
+            generated_ids_trimmed,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False
+        )[0]
         
-        # 进一步清理：移除可能残留的用户消息
-        if message in response and len(response) > len(message):
-            response = response.replace(message, '').strip()
+        # 清理输出
+        response = response.strip()
+        
+        # 移除可能的系统标记
+        for marker in ["<|im_end|>", "<|im_start|>", "assistant", "Assistant:"]:
+            response = response.replace(marker, "")
+        
+        response = response.strip()
         
         logger.info(f"用户: {message[:50]}... | 回复: {response[:100]}...")
         
