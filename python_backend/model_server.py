@@ -37,8 +37,17 @@ processor = None
 device = None
 
 # 模型配置
-MODEL_NAME = "HuggingFaceTB/SmolVLM-500M-Instruct"
+MODEL_NAME = "Qwen/Qwen3-VL-8B-Instruct"
+MODEL_DISPLAY_NAME = "Qwen3-VL 8B"
 MODEL_CACHE_DIR = os.path.join(os.path.dirname(__file__), "models")
+
+# 生成参数配置
+GENERATION_CONFIG = {
+    'max_tokens': 1024,
+    'temperature': 0.7,
+    'top_p': 0.9,
+    'repetition_penalty': 1.1
+}
 
 def load_model():
     """加载模型和处理器"""
@@ -126,7 +135,9 @@ def health_check():
     return jsonify({
         'status': 'ok',
         'model_loaded': model is not None,
-        'device': str(device) if device else 'unknown'
+        'device': str(device) if device else 'unknown',
+        'model_name': MODEL_DISPLAY_NAME,
+        'model_id': MODEL_NAME
     })
 
 @app.route('/chat', methods=['POST'])
@@ -202,11 +213,11 @@ def chat():
         with torch.no_grad():
             generated_ids = model.generate(
                 **inputs,
-                max_new_tokens=512,
+                max_new_tokens=GENERATION_CONFIG['max_tokens'],
                 do_sample=True,
-                temperature=0.7,
-                top_p=0.9,
-                repetition_penalty=1.2
+                temperature=GENERATION_CONFIG['temperature'],
+                top_p=GENERATION_CONFIG['top_p'],
+                repetition_penalty=GENERATION_CONFIG['repetition_penalty']
             )
         
         # 解码输出

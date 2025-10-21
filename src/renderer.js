@@ -14,7 +14,6 @@ const imageInput = document.getElementById('imageInput');
 const imagePreview = document.getElementById('imagePreview');
 const previewImage = document.getElementById('previewImage');
 const removeImageBtn = document.getElementById('removeImageBtn');
-const downloadModelBtn = document.getElementById('downloadModelBtn');
 const statusIndicator = document.getElementById('statusIndicator');
 const statusText = document.getElementById('statusText');
 
@@ -54,9 +53,6 @@ function setupEventListeners() {
   imageInput.addEventListener('change', handleImageSelect);
   removeImageBtn.addEventListener('click', removeImage);
   
-  // 下载模型
-  downloadModelBtn.addEventListener('click', downloadModel);
-  
   // 快捷按钮
   document.querySelectorAll('.quick-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -77,6 +73,18 @@ async function checkServerStatus() {
       statusIndicator.classList.add('connected');
       statusText.textContent = '已连接';
       sendBtn.disabled = false;
+      
+      // 更新模型名称显示
+      if (data.model_name) {
+        const modelInfoElement = document.querySelector('.model-info small');
+        if (modelInfoElement) {
+          modelInfoElement.textContent = data.model_name;
+        }
+        const chatHeaderModel = document.querySelector('.character-info small');
+        if (chatHeaderModel) {
+          chatHeaderModel.textContent = data.model_name + ' 模型';
+        }
+      }
     } else {
       statusIndicator.classList.remove('connected');
       statusText.textContent = data.model_loaded ? '模型未加载' : '连接中...';
@@ -290,26 +298,6 @@ function removeImage() {
   imagePreview.style.display = 'none';
   previewImage.src = '';
   imageInput.value = '';
-}
-
-// 下载模型
-async function downloadModel() {
-  if (window.electronAPI && window.electronAPI.downloadModel) {
-    downloadModelBtn.disabled = true;
-    downloadModelBtn.innerHTML = '<span>⏳</span> 下载中...';
-    
-    try {
-      await window.electronAPI.downloadModel();
-      alert('模型下载完成！请重启应用。');
-    } catch (error) {
-      alert('模型下载失败: ' + error.message);
-    } finally {
-      downloadModelBtn.disabled = false;
-      downloadModelBtn.innerHTML = '<span>📥</span> 下载模型';
-    }
-  } else {
-    alert('请通过命令行运行: python python_backend/download_model.py');
-  }
 }
 
 // 页面加载完成后初始化
