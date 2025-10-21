@@ -174,7 +174,7 @@ function addMessage(text, sender, image = null, isError = false) {
   
   const avatar = document.createElement('div');
   avatar.className = 'message-avatar';
-  avatar.textContent = sender === 'user' ? '👤' : '🎵';
+  avatar.textContent = sender === 'user' ? '我' : 'AI';
   
   const content = document.createElement('div');
   content.className = 'message-content';
@@ -217,7 +217,7 @@ function addTypingIndicator() {
   
   const avatar = document.createElement('div');
   avatar.className = 'message-avatar';
-  avatar.textContent = '🎵';
+  avatar.textContent = 'AI';
   
   const content = document.createElement('div');
   content.className = 'message-content';
@@ -251,13 +251,13 @@ async function newConversation() {
   
   chatContainer.innerHTML = `
     <div class="welcome-message">
-      <div class="welcome-icon">🌟</div>
+      <div class="welcome-icon">★</div>
       <h2>欢迎使用 MikuChat!</h2>
       <p>我是你的AI虚拟伙伴，有什么可以帮助你的吗？</p>
       <div class="quick-actions">
-        <button class="quick-btn" data-prompt="你好！请介绍一下你自己">👋 打个招呼</button>
-        <button class="quick-btn" data-prompt="你能做什么？">💡 你能做什么</button>
-        <button class="quick-btn" data-prompt="给我讲个笑话吧">😄 讲个笑话</button>
+        <button class="quick-btn" data-prompt="你好！请介绍一下你自己">打个招呼</button>
+        <button class="quick-btn" data-prompt="你能做什么？">你能做什么</button>
+        <button class="quick-btn" data-prompt="给我讲个笑话吧">讲个笑话</button>
       </div>
     </div>
   `;

@@ -5,16 +5,17 @@
 }
 
 :root {
-  --primary-color: #00bcd4;
-  --secondary-color: #ff4081;
-  --bg-dark: #1a1a2e;
-  --bg-light: #16213e;
-  --bg-lighter: #0f3460;
+  --primary-color: #4a90e2;
+  --secondary-color: #5ca9f5;
+  --accent-color: #2c6fb9;
+  --bg-dark: #0f1419;
+  --bg-light: #1a2332;
+  --bg-lighter: #2a3f5f;
   --text-primary: #ffffff;
-  --text-secondary: #b0b0b0;
-  --border-color: #2d3748;
-  --success-color: #4caf50;
-  --shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+  --text-secondary: #8da3c7;
+  --border-color: #2d4263;
+  --success-color: #5ca9f5;
+  --shadow: 0 4px 12px rgba(74, 144, 226, 0.2);
 }
 
 body {
@@ -38,11 +39,13 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  border-radius: 0;
 }
 
 .sidebar-header {
   padding: 24px 20px;
   background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+  border-radius: 0;
 }
 
 .sidebar-header h2 {
@@ -56,8 +59,11 @@ body {
 }
 
 .model-status {
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border-color);
+  padding: 16px;
+  background: rgba(74, 144, 226, 0.05);
+  margin: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(74, 144, 226, 0.1);
 }
 
 .status-indicator {
@@ -95,19 +101,19 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  border-bottom: 1px solid var(--border-color);
 }
 
 .btn {
   padding: 10px 16px;
   border: none;
-  border-radius: 8px;
+  border-radius: 12px;
   cursor: pointer;
   font-size: 14px;
   font-weight: 500;
   transition: all 0.3s;
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
 }
 
@@ -126,6 +132,8 @@ body {
   flex: 1;
   padding: 16px 20px;
   overflow-y: auto;
+  border-top: 1px solid var(--border-color);
+  margin-top: 12px;
 }
 
 .chat-history h3 {
@@ -154,6 +162,7 @@ body {
   padding: 16px 24px;
   background: var(--bg-light);
   border-bottom: 1px solid var(--border-color);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .character-info {
@@ -170,7 +179,9 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 24px;
+  font-size: 14px;
+  font-weight: 600;
+  color: white;
 }
 
 .character-info h3 {
@@ -204,6 +215,8 @@ body {
   font-size: 64px;
   margin-bottom: 20px;
   animation: float 3s ease-in-out infinite;
+  color: var(--primary-color);
+  text-shadow: 0 0 20px rgba(74, 144, 226, 0.5);
 }
 
 @keyframes float {
@@ -236,7 +249,7 @@ body {
   padding: 12px 20px;
   background: var(--bg-lighter);
   border: 1px solid var(--border-color);
-  border-radius: 20px;
+  border-radius: 24px;
   color: var(--text-primary);
   cursor: pointer;
   font-size: 14px;
@@ -283,16 +296,20 @@ body {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: white;
 }
 
 .message.user .message-avatar {
   background: var(--bg-lighter);
+  border: 2px solid var(--primary-color);
 }
 
 .message-content {
   background: var(--bg-light);
   padding: 12px 16px;
-  border-radius: 16px;
+  border-radius: 18px;
   line-height: 1.5;
   word-wrap: break-word;
 }
@@ -303,7 +320,7 @@ body {
 
 .message-image {
   max-width: 300px;
-  border-radius: 8px;
+  border-radius: 12px;
   margin-bottom: 8px;
 }
 
@@ -345,6 +362,7 @@ body {
   padding: 20px 24px;
   background: var(--bg-light);
   border-top: 1px solid var(--border-color);
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .input-container {
@@ -353,7 +371,7 @@ body {
   gap: 12px;
   background: var(--bg-dark);
   border: 2px solid var(--border-color);
-  border-radius: 24px;
+  border-radius: 28px;
   padding: 8px 12px;
   transition: border-color 0.3s;
 }
@@ -386,7 +404,9 @@ body {
   align-items: center;
   justify-content: center;
   transition: all 0.3s;
-  font-size: 18px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
 }
 
 .btn-icon:hover {
@@ -396,11 +416,14 @@ body {
 
 .btn-send {
   background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+  color: white;
+  font-size: 11px;
 }
 
 .btn-send:hover {
   transform: scale(1.1);
   box-shadow: var(--shadow);
+  background: linear-gradient(135deg, var(--secondary-color), var(--primary-color));
 }
 
 .btn-send:disabled {
@@ -417,7 +440,7 @@ body {
 .image-preview img {
   max-width: 200px;
   max-height: 200px;
-  border-radius: 8px;
+  border-radius: 12px;
   border: 2px solid var(--border-color);
 }
 
@@ -428,12 +451,18 @@ body {
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  background: var(--secondary-color);
+  background: var(--primary-color);
   color: white;
   border: none;
   cursor: pointer;
   font-size: 14px;
   line-height: 1;
+  transition: all 0.3s;
+}
+
+.remove-image:hover {
+  background: var(--accent-color);
+  transform: scale(1.1);
 }
 
 /* 滚动条样式 */
@@ -447,9 +476,47 @@ body {
 
 ::-webkit-scrollbar-thumb {
   background: var(--bg-lighter);
-  border-radius: 4px;
+  border-radius: 8px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--primary-color);
+}
+
+/* 增强视觉效果 */
+.chat-header {
+  border-radius: 0;
+}
+
+.sidebar,
+.main-content {
+  border-radius: 0;
+}
+
+/* 按钮和输入框增强 */
+.btn-secondary:active {
+  transform: translateY(0);
+}
+
+.quick-btn:active {
+  transform: translateY(0);
+}
+
+/* 焦点效果 */
+.input-container:focus-within {
+  box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.15);
+}
+
+/* 欢迎页面增强 */
+.welcome-message h2 {
+  text-shadow: 0 2px 10px rgba(74, 144, 226, 0.3);
+}
+
+/* 消息动画增强 */
+.message-content {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.message.user .message-content {
+  box-shadow: 0 2px 12px rgba(74, 144, 226, 0.3);
 }
