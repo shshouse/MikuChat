@@ -158,6 +158,17 @@ function renderHistoryList() {
     return;
   }
   
+  // 添加总空间占用显示
+  const totalSize = getTotalConversationsSize();
+  const headerDiv = document.createElement('div');
+  headerDiv.className = 'history-stats';
+  headerDiv.innerHTML = `
+    <div style="color: var(--text-secondary); font-size: 11px; padding: 8px 12px; border-bottom: 1px solid var(--border-color);">
+      共 ${conversations.length} 个对话 | 总占用: ${formatSize(totalSize)}
+    </div>
+  `;
+  historyList.appendChild(headerDiv);
+  
   conversations.forEach(conversation => {
     const item = document.createElement('div');
     item.className = 'history-item';
@@ -167,13 +178,20 @@ function renderHistoryList() {
     
     const roleInfo = conversation.roleName || 'AI助手';
     const timeStr = formatTime(new Date(conversation.updatedAt));
+    const size = calculateConversationSize(conversation);
+    const sizeStr = formatSize(size);
+    
+    // 判断是否有图片
+    const hasImage = conversation.messages.some(msg => msg.image);
+    const imageIcon = hasImage ? '<span class="has-image-icon" title="包含图片">🖼️</span>' : '';
     
     item.innerHTML = `
       <div class="history-item-content">
-        <div class="history-item-title">${conversation.title}</div>
+        <div class="history-item-title">${imageIcon}${conversation.title}</div>
         <div class="history-item-meta">
           <span class="history-item-role">${roleInfo}</span>
           <span class="history-item-time">${timeStr}</span>
+          <span class="history-item-size" title="空间占用">${sizeStr}</span>
         </div>
       </div>
       <button class="history-item-delete" title="删除对话">×</button>
@@ -202,7 +220,8 @@ function renderConversationMessages() {
   
   conversationHistory.forEach(msg => {
     if (msg.role === 'user') {
-      addMessage(msg.content, 'user', null, false);
+      // 如果消息包含图片，传递图片数据
+      addMessage(msg.content, 'user', msg.image || null, false);
     } else if (msg.role === 'assistant') {
       addMessage(msg.content, 'assistant', null, false);
     }
@@ -273,6 +292,29 @@ function formatTime(date) {
   
   // 更早
   return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
+}
+
+// 计算对话占用的空间大小
+function calculateConversationSize(conversation) {
+  const jsonString = JSON.stringify(conversation);
+  return jsonString.length * 2; // JavaScript字符串使用UTF-16，每个字符2字节
+}
+
+// 格式化文件大小
+function formatSize(bytes) {
+  if (bytes < 1024) {
+    return bytes + ' B';
+  } else if (bytes < 1024 * 1024) {
+    return (bytes / 1024).toFixed(1) + ' KB';
+  } else {
+    return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+  }
+}
+
+// 计算所有对话的总大小
+function getTotalConversationsSize() {
+  const jsonString = JSON.stringify(conversations);
+  return jsonString.length * 2;
 }
 
 // 设置事件监听器
@@ -436,11 +478,13 @@ async function sendMessage() {
     welcomeMsg.remove();
   }
   
+  // 保存图片引用
+  const imageToSend = selectedImage;
+  
   // 添加用户消息
-  addMessage(message, 'user', selectedImage);
+  addMessage(message, 'user', imageToSend);
   
   // 清空输入
-  const imageToSend = selectedImage;
   messageInput.value = '';
   messageInput.style.height = 'auto';
   removeImage();
@@ -458,7 +502,7 @@ async function sendMessage() {
       body: JSON.stringify({
         message: message,
         image: imageToSend,
-        history: conversationHistory,  // 发送对话历史
+        history: conversationHistory,  // 发送之前的对话历史（不包含当前消息）
         role_id: currentRoleId,  // 发送当前选择的角色ID
       }),
     });
@@ -476,18 +520,25 @@ async function sendMessage() {
     addMessage(data.response, 'assistant');
     
     // 更新对话历史
-    conversationHistory.push({
+    const userMessage = {
       role: 'user',
       content: message
-    });
+    };
+    
+    // 如果有图片，保存图片数据
+    if (imageToSend) {
+      userMessage.image = imageToSend;
+    }
+    
+    conversationHistory.push(userMessage);
     conversationHistory.push({
       role: 'assistant',
       content: data.response
     });
     
-    // 限制历史长度（最多保留最近10轮对话）
-    if (conversationHistory.length > 20) {
-      conversationHistory = conversationHistory.slice(-20);
+    // 限制历史长度（最多保留最近20轮对话）
+    if (conversationHistory.length > 40) {
+      conversationHistory = conversationHistory.slice(-40);
     }
     
     // 保存对话到本地存储

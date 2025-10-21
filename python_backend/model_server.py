@@ -260,7 +260,7 @@ def chat():
             logger.info(f"使用角色: {role_id}")
         
         # 添加历史消息（限制历史长度以节省内存）
-        for h in history[-4:]:  # 只保留最近2轮对话（Qwen3-VL 更占显存）
+        for h in history[-40:]:  # 保留最近20轮对话（40条消息）
             if h['role'] == 'user':
                 messages.append({
                     "role": "user",

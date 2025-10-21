@@ -290,6 +290,20 @@ body {
   opacity: 0.7;
 }
 
+.history-item-size {
+  padding: 2px 6px;
+  background: rgba(92, 169, 245, 0.15);
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--primary-color);
+}
+
+.has-image-icon {
+  margin-right: 4px;
+  font-size: 12px;
+}
+
 .history-item-delete {
   width: 24px;
   height: 24px;
