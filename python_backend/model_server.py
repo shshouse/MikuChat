@@ -6,6 +6,13 @@ import os
 import sys
 import json
 import logging
+
+# 设置控制台编码为 UTF-8
+if sys.platform == 'win32':
+    import codecs
+    sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
+    sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from transformers import AutoProcessor, AutoModelForVision2Seq
@@ -37,10 +44,21 @@ def load_model():
     """加载模型和处理器"""
     global model, processor, device
     
+    logger.info("=" * 50)
     logger.info("开始加载模型...")
     
     # 检测设备
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    if torch.cuda.is_available():
+        device = "cuda"
+        logger.info(f"检测到 GPU: {torch.cuda.get_device_name(0)}")
+        logger.info(f"CUDA 版本: {torch.version.cuda}")
+        logger.info(f"GPU 内存: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.2f} GB")
+    else:
+        device = "cpu"
+        logger.warning("未检测到 CUDA GPU，使用 CPU 模式")
+        logger.warning("如果有 NVIDIA GPU，请安装 PyTorch CUDA 版本:")
+        logger.warning("pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121")
+    
     logger.info(f"使用设备: {device}")
     
     try:
@@ -52,12 +70,22 @@ def load_model():
         logger.info(f"模型下载到: {model_dir}")
         
         # 加载处理器和模型
-        processor = AutoProcessor.from_pretrained(model_dir)
-        model = AutoModelForVision2Seq.from_pretrained(
-            model_dir,
-            torch_dtype=torch.float16 if device == "cuda" else torch.float32,
-            device_map=device
-        )
+        processor = AutoProcessor.from_pretrained(model_dir, trust_remote_code=True)
+        
+        if device == "cuda":
+            model = AutoModelForVision2Seq.from_pretrained(
+                model_dir,
+                torch_dtype=torch.float16,
+                device_map="auto",
+                trust_remote_code=True
+            )
+        else:
+            model = AutoModelForVision2Seq.from_pretrained(
+                model_dir,
+                torch_dtype=torch.float32,
+                trust_remote_code=True
+            )
+            model = model.to(device)
         
         logger.info("模型加载成功!")
         return True
@@ -67,13 +95,25 @@ def load_model():
         # 如果魔搭失败，尝试从 HuggingFace 加载
         try:
             logger.info("尝试从 HuggingFace 加载模型...")
-            processor = AutoProcessor.from_pretrained(MODEL_NAME, cache_dir=MODEL_CACHE_DIR)
-            model = AutoModelForVision2Seq.from_pretrained(
-                MODEL_NAME,
-                torch_dtype=torch.float16 if device == "cuda" else torch.float32,
-                device_map=device,
-                cache_dir=MODEL_CACHE_DIR
-            )
+            processor = AutoProcessor.from_pretrained(MODEL_NAME, cache_dir=MODEL_CACHE_DIR, trust_remote_code=True)
+            
+            if device == "cuda":
+                model = AutoModelForVision2Seq.from_pretrained(
+                    MODEL_NAME,
+                    torch_dtype=torch.float16,
+                    device_map="auto",
+                    cache_dir=MODEL_CACHE_DIR,
+                    trust_remote_code=True
+                )
+            else:
+                model = AutoModelForVision2Seq.from_pretrained(
+                    MODEL_NAME,
+                    torch_dtype=torch.float32,
+                    cache_dir=MODEL_CACHE_DIR,
+                    trust_remote_code=True
+                )
+                model = model.to(device)
+            
             logger.info("从 HuggingFace 加载成功!")
             return True
         except Exception as e2:
@@ -96,6 +136,7 @@ def chat():
         data = request.json
         message = data.get('message', '')
         image_data = data.get('image', None)  # base64 编码的图片（可选）
+        history = data.get('history', [])  # 对话历史
         
         if not message:
             return jsonify({'error': '消息不能为空'}), 400
@@ -113,11 +154,49 @@ def chat():
             except Exception as e:
                 logger.warning(f"图片处理失败: {str(e)}")
         
+        # 构建消息格式（使用聊天模板）
+        messages = []
+        
+        # 添加历史消息（限制历史长度以节省内存）
+        for h in history[-6:]:  # 只保留最近3轮对话
+            if h['role'] == 'user':
+                messages.append({
+                    "role": "user",
+                    "content": [{"type": "text", "text": h['content']}]
+                })
+            elif h['role'] == 'assistant':
+                messages.append({
+                    "role": "assistant", 
+                    "content": [{"type": "text", "text": h['content']}]
+                })
+        
+        # 添加当前消息
+        if image:
+            messages.append({
+                "role": "user",
+                "content": [
+                    {"type": "image"},
+                    {"type": "text", "text": message}
+                ]
+            })
+        else:
+            messages.append({
+                "role": "user",
+                "content": [{"type": "text", "text": message}]
+            })
+        
+        # 使用处理器的聊天模板
+        prompt = processor.apply_chat_template(
+            messages, 
+            add_generation_prompt=True,
+            tokenize=False
+        )
+        
         # 准备输入
         if image:
-            inputs = processor(text=message, images=image, return_tensors="pt").to(device)
+            inputs = processor(text=prompt, images=image, return_tensors="pt").to(device)
         else:
-            inputs = processor(text=message, return_tensors="pt").to(device)
+            inputs = processor(text=prompt, return_tensors="pt").to(device)
         
         # 生成回复
         with torch.no_grad():
@@ -126,17 +205,24 @@ def chat():
                 max_new_tokens=512,
                 do_sample=True,
                 temperature=0.7,
-                top_p=0.9
+                top_p=0.9,
+                repetition_penalty=1.2
             )
         
         # 解码输出
-        response = processor.decode(generated_ids[0], skip_special_tokens=True)
+        full_response = processor.decode(generated_ids[0], skip_special_tokens=True)
         
-        # 移除输入部分，只保留生成的回复
-        if message in response:
+        # 提取助手回复部分（移除提示词）
+        if "Assistant:" in full_response:
+            response = full_response.split("Assistant:")[-1].strip()
+        else:
+            response = full_response.strip()
+        
+        # 进一步清理：移除可能残留的用户消息
+        if message in response and len(response) > len(message):
             response = response.replace(message, '').strip()
         
-        logger.info(f"用户: {message[:50]}... | 回复: {response[:50]}...")
+        logger.info(f"用户: {message[:50]}... | 回复: {response[:100]}...")
         
         return jsonify({
             'response': response,
@@ -145,6 +231,8 @@ def chat():
         
     except Exception as e:
         logger.error(f"聊天处理错误: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
 @app.route('/reset', methods=['POST'])

@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 >nul
 echo ================================
 echo    MikuChat 启动脚本 (Windows)
 echo ================================

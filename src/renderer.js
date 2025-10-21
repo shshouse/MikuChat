@@ -2,6 +2,7 @@
 
 const API_URL = 'http://127.0.0.1:5000';
 let selectedImage = null;
+let conversationHistory = [];  // 存储对话历史
 
 // DOM 元素
 const chatContainer = document.getElementById('chatContainer');
@@ -120,6 +121,7 @@ async function sendMessage() {
       body: JSON.stringify({
         message: message,
         image: imageToSend,
+        history: conversationHistory,  // 发送对话历史
       }),
     });
     
@@ -134,6 +136,21 @@ async function sendMessage() {
     
     // 添加 AI 回复
     addMessage(data.response, 'assistant');
+    
+    // 更新对话历史
+    conversationHistory.push({
+      role: 'user',
+      content: message
+    });
+    conversationHistory.push({
+      role: 'assistant',
+      content: data.response
+    });
+    
+    // 限制历史长度（最多保留最近10轮对话）
+    if (conversationHistory.length > 20) {
+      conversationHistory = conversationHistory.slice(-20);
+    }
     
   } catch (error) {
     removeTypingIndicator(typingId);
@@ -221,6 +238,9 @@ function removeTypingIndicator(id) {
 
 // 新对话
 async function newConversation() {
+  // 清空对话历史
+  conversationHistory = [];
+  
   chatContainer.innerHTML = `
     <div class="welcome-message">
       <div class="welcome-icon">🌟</div>
