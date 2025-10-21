@@ -41,6 +41,9 @@ MODEL_NAME = "Qwen/Qwen2-VL-2B-Instruct"
 MODEL_DISPLAY_NAME = "Qwen2-VL 2B"
 MODEL_CACHE_DIR = os.path.join(os.path.dirname(__file__), "models")
 
+# 角色配置目录
+ROLE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "role")
+
 # 生成参数配置
 GENERATION_CONFIG = {
     'max_tokens': 512,
@@ -48,6 +51,47 @@ GENERATION_CONFIG = {
     'top_p': 0.9,
     'repetition_penalty': 1.1
 }
+
+# 全局变量存储角色数据
+roles_cache = {}
+
+def load_roles():
+    """加载所有角色配置"""
+    global roles_cache
+    roles_cache = {}
+    
+    if not os.path.exists(ROLE_DIR):
+        logger.warning(f"角色目录不存在: {ROLE_DIR}")
+        return
+    
+    try:
+        for role_id in os.listdir(ROLE_DIR):
+            role_path = os.path.join(ROLE_DIR, role_id)
+            
+            # 跳过非目录和README文件
+            if not os.path.isdir(role_path):
+                continue
+            
+            # 读取角色配置文件
+            character_file = os.path.join(role_path, "character.json")
+            if os.path.exists(character_file):
+                try:
+                    with open(character_file, 'r', encoding='utf-8') as f:
+                        character_data = json.load(f)
+                        roles_cache[role_id] = character_data
+                        logger.info(f"加载角色: {role_id} - {character_data.get('name', 'Unknown')}")
+                except Exception as e:
+                    logger.error(f"加载角色 {role_id} 失败: {str(e)}")
+        
+        logger.info(f"总共加载了 {len(roles_cache)} 个角色")
+    except Exception as e:
+        logger.error(f"加载角色配置失败: {str(e)}")
+
+def get_role_system_prompt(role_id):
+    """获取角色的系统提示词"""
+    if role_id and role_id in roles_cache:
+        return roles_cache[role_id].get('system_prompt', '')
+    return ''
 
 def load_model():
     """加载模型和处理器"""
@@ -140,6 +184,43 @@ def health_check():
         'model_id': MODEL_NAME
     })
 
+@app.route('/roles', methods=['GET'])
+def get_roles():
+    """获取所有可用角色列表"""
+    try:
+        roles_list = []
+        for role_id, role_data in roles_cache.items():
+            roles_list.append({
+                'id': role_id,
+                'name': role_data.get('name', role_id),
+                'nickname': role_data.get('nickname', ''),
+                'description': role_data.get('description', ''),
+                'personality': role_data.get('personality', [])
+            })
+        
+        return jsonify({
+            'status': 'success',
+            'roles': roles_list
+        })
+    except Exception as e:
+        logger.error(f"获取角色列表失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/role/<role_id>', methods=['GET'])
+def get_role_detail(role_id):
+    """获取指定角色的详细信息"""
+    try:
+        if role_id not in roles_cache:
+            return jsonify({'error': '角色不存在'}), 404
+        
+        return jsonify({
+            'status': 'success',
+            'role': roles_cache[role_id]
+        })
+    except Exception as e:
+        logger.error(f"获取角色详情失败: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/chat', methods=['POST'])
 def chat():
     """聊天接口"""
@@ -148,6 +229,7 @@ def chat():
         message = data.get('message', '')
         image_data = data.get('image', None)  # base64 编码的图片（可选）
         history = data.get('history', [])  # 对话历史
+        role_id = data.get('role_id', None)  # 角色ID
         
         if not message:
             return jsonify({'error': '消息不能为空'}), 400
@@ -167,6 +249,15 @@ def chat():
         
         # 构建 Qwen3-VL 的消息格式
         messages = []
+        
+        # 添加角色系统提示词（如果选择了角色）
+        system_prompt = get_role_system_prompt(role_id)
+        if system_prompt:
+            messages.append({
+                "role": "system",
+                "content": system_prompt
+            })
+            logger.info(f"使用角色: {role_id}")
         
         # 添加历史消息（限制历史长度以节省内存）
         for h in history[-4:]:  # 只保留最近2轮对话（Qwen3-VL 更占显存）
@@ -292,11 +383,16 @@ def main():
     """主函数"""
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5000
     
-    # 启动时加载模型
+    # 启动时加载模型和角色
     logger.info("="*50)
     logger.info("虚拟人物聊天后端启动中...")
     logger.info("="*50)
     
+    # 加载角色配置
+    logger.info("加载角色配置...")
+    load_roles()
+    
+    # 加载模型
     success = load_model()
     if not success:
         logger.error("模型加载失败，但服务器仍会启动")
