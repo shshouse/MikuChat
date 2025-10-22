@@ -25,6 +25,53 @@ function checkPortAvailable(port) {
   });
 }
 
+// 检查后端服务是否真的准备好
+async function waitForBackendReady(maxWaitTime = 60000) {
+  const http = require('http');
+  const startTime = Date.now();
+  
+  console.log('等待后端服务完全准备好...');
+  
+  while (Date.now() - startTime < maxWaitTime) {
+    try {
+      // 尝试调用健康检查接口
+      const response = await new Promise((resolve, reject) => {
+        const req = http.get(`http://127.0.0.1:${PYTHON_PORT}/health`, (res) => {
+          let data = '';
+          res.on('data', chunk => data += chunk);
+          res.on('end', () => {
+            try {
+              resolve(JSON.parse(data));
+            } catch (e) {
+              reject(e);
+            }
+          });
+        });
+        req.on('error', reject);
+        req.setTimeout(2000);
+      });
+      
+      // 检查模型是否已加载
+      if (response.status === 'ok' && response.model_loaded) {
+        console.log('✓ 后端服务已完全准备好！');
+        console.log(`  模型: ${response.model_name}`);
+        console.log(`  设备: ${response.device}`);
+        return true;
+      } else if (response.status === 'ok') {
+        console.log('后端服务运行中，但模型仍在加载...');
+      }
+    } catch (error) {
+      // 忽略连接错误，继续等待
+    }
+    
+    // 等待2秒后重试
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
+  
+  console.warn('⚠ 后端服务等待超时，但仍会继续启动前端');
+  return false;
+}
+
 // 启动 Python 后端服务
 async function startPythonBackend() {
   const pythonPath = 'python'; // 或 'python3' 根据系统
@@ -36,20 +83,29 @@ async function startPythonBackend() {
   // 检查端口是否已被占用
   const isAvailable = await checkPortAvailable(PYTHON_PORT);
   if (!isAvailable) {
-    console.log(`端口 ${PYTHON_PORT} 已被占用，尝试连接现有服务...`);
-    return true;
+    console.log(`端口 ${PYTHON_PORT} 已被占用，检查现有服务...`);
+    // 检查现有服务是否可用
+    const isReady = await waitForBackendReady(5000);
+    return isReady;
   }
   
   return new Promise((resolve) => {
     pythonProcess = spawn(pythonPath, [scriptPath, PYTHON_PORT.toString()]);
     
+    let processStarted = false;
+    
     pythonProcess.stdout.on('data', (data) => {
       console.log(`Python: ${data.toString()}`);
       
       // 检测服务器启动成功的标志
-      if (data.toString().includes('Running on')) {
-        console.log('Python 后端服务启动成功！');
-        resolve(true);
+      if (data.toString().includes('Running on') && !processStarted) {
+        processStarted = true;
+        console.log('Python 后端进程已启动，等待完全准备...');
+        
+        // 等待后端真正准备好（模型加载完成）
+        waitForBackendReady().then((ready) => {
+          resolve(ready);
+        });
       }
     });
     
@@ -60,6 +116,9 @@ async function startPythonBackend() {
     pythonProcess.on('close', (code) => {
       console.log(`Python 进程退出，退出码: ${code}`);
       pythonProcess = null;
+      if (!processStarted) {
+        resolve(false);
+      }
     });
     
     pythonProcess.on('error', (err) => {
@@ -67,13 +126,15 @@ async function startPythonBackend() {
       resolve(false);
     });
     
-    // 5秒后如果还没启动成功，也继续（可能模型加载需要时间）
+    // 30秒后如果还没看到启动日志，认为启动失败
     setTimeout(() => {
-      if (pythonProcess) {
-        console.log('Python 进程已启动，等待模型加载...');
-        resolve(true);
+      if (!processStarted && pythonProcess) {
+        console.log('⚠ Python 进程启动超时，尝试继续等待...');
+        waitForBackendReady(30000).then((ready) => {
+          resolve(ready);
+        });
       }
-    }, 5000);
+    }, 30000);
   });
 }
 
@@ -145,15 +206,34 @@ ipcMain.handle('download-model', async () => {
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(async () => {
+  console.log('========================================');
+  console.log('       MikuChat 正在启动');
+  console.log('========================================');
+  console.log('');
+  
   // 先启动 Python 后端
+  console.log('[步骤 1/2] 启动后端服务并加载模型...');
+  console.log('提示: 首次启动或模型加载可能需要较长时间，请耐心等待');
+  console.log('');
+  
   const backendStarted = await startPythonBackend();
   
   if (!backendStarted) {
-    console.warn('Python 后端启动失败，但应用将继续运行');
+    console.warn('⚠ Python 后端启动失败或超时，但应用将继续运行');
+    console.warn('  您可能无法使用AI对话功能，但可以查看界面');
+  } else {
+    console.log('✓ 后端服务已准备就绪');
   }
+  
+  console.log('');
+  console.log('[步骤 2/2] 启动前端界面...');
   
   // 创建窗口
   createWindow();
+  
+  console.log('✓ 应用启动完成！');
+  console.log('');
+  console.log('========================================');
 
   // On OS X it's common to re-create a window in the app when the
   // dock icon is clicked and there are no other windows open.

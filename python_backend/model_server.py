@@ -60,38 +60,83 @@ def load_roles():
     global roles_cache
     roles_cache = {}
     
+    logger.info(f"尝试从以下路径加载角色: {ROLE_DIR}")
+    
     if not os.path.exists(ROLE_DIR):
         logger.warning(f"角色目录不存在: {ROLE_DIR}")
+        logger.warning(f"当前工作目录: {os.getcwd()}")
+        logger.warning(f"__file__ 路径: {__file__}")
         return
     
     try:
-        for role_id in os.listdir(ROLE_DIR):
+        dir_contents = os.listdir(ROLE_DIR)
+        logger.info(f"角色目录内容: {dir_contents}")
+        
+        for role_id in dir_contents:
             role_path = os.path.join(ROLE_DIR, role_id)
+            
+            logger.info(f"检查: {role_id} -> {role_path}")
             
             # 跳过非目录和README文件
             if not os.path.isdir(role_path):
+                logger.info(f"  跳过（非目录）: {role_id}")
                 continue
             
             # 读取角色配置文件
             character_file = os.path.join(role_path, "character.json")
+            logger.info(f"  查找配置文件: {character_file}")
+            
             if os.path.exists(character_file):
                 try:
                     with open(character_file, 'r', encoding='utf-8') as f:
                         character_data = json.load(f)
                         roles_cache[role_id] = character_data
-                        logger.info(f"加载角色: {role_id} - {character_data.get('name', 'Unknown')}")
+                        logger.info(f"✓ 成功加载角色: {role_id} - {character_data.get('name', 'Unknown')}")
                 except Exception as e:
-                    logger.error(f"加载角色 {role_id} 失败: {str(e)}")
+                    logger.error(f"✗ 加载角色 {role_id} 失败: {str(e)}")
+                    import traceback
+                    logger.error(traceback.format_exc())
+            else:
+                logger.warning(f"  配置文件不存在: {character_file}")
         
+        logger.info(f"========================================")
         logger.info(f"总共加载了 {len(roles_cache)} 个角色")
+        logger.info(f"角色列表: {list(roles_cache.keys())}")
+        logger.info(f"========================================")
     except Exception as e:
         logger.error(f"加载角色配置失败: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
 
 def get_role_system_prompt(role_id):
     """获取角色的系统提示词"""
     if role_id and role_id in roles_cache:
         return roles_cache[role_id].get('system_prompt', '')
     return ''
+
+def get_role_live2d_config(role_id):
+    """获取角色的Live2D配置"""
+    if role_id and role_id in roles_cache:
+        return roles_cache[role_id].get('live2d', {})
+    return {}
+
+def extract_emotion(response_text, role_id):
+    """从回复文本中提取情绪标签"""
+    import re
+    
+    # 尝试匹配 [情绪:XXX] 格式
+    emotion_match = re.match(r'\[情绪[:：](.+?)\]', response_text)
+    if emotion_match:
+        emotion = emotion_match.group(1).strip()
+        # 移除情绪标签，只返回文本
+        clean_text = re.sub(r'\[情绪[:：].+?\]', '', response_text).strip()
+        return emotion, clean_text
+    
+    # 如果没有情绪标签，返回默认情绪
+    live2d_config = get_role_live2d_config(role_id)
+    default_emotion = live2d_config.get('default_emotion', '待机') if live2d_config.get('enabled') else None
+    
+    return default_emotion, response_text
 
 def load_model():
     """加载模型和处理器"""
@@ -360,10 +405,15 @@ def chat():
         
         response = response.strip()
         
-        logger.info(f"用户: {message[:50]}... | 回复: {response[:100]}...")
+        # 提取情绪标签
+        emotion, clean_response = extract_emotion(response, role_id)
+        
+        logger.info(f"用户: {message[:50]}... | 回复: {clean_response[:100]}... | 情绪: {emotion}")
         
         return jsonify({
-            'response': response,
+            'response': clean_response,
+            'emotion': emotion,
+            'role_id': role_id,
             'status': 'success'
         })
         

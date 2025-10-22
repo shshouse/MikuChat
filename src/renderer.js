@@ -22,16 +22,32 @@ const statusIndicator = document.getElementById('statusIndicator');
 const statusText = document.getElementById('statusText');
 const roleList = document.getElementById('roleList');
 const historyList = document.getElementById('historyList');
+const live2dContainer = document.getElementById('live2dContainer');
+const live2dImage = document.getElementById('live2dImage');
 
 // 初始化
 async function init() {
   setupEventListeners();
-  await loadRoles();  // 加载角色列表
-  loadConversations();  // 加载对话历史
-  checkServerStatus();
+  
+  // 先检查服务器状态
+  await checkServerStatus();
+  
+  // 加载角色列表（带重试机制）
+  await loadRolesWithRetry();
+  
+  // 加载对话历史
+  loadConversations();
   
   // 定期检查服务器状态
   setInterval(checkServerStatus, 5000);
+  
+  // 每30秒重新加载一次角色列表（防止初始加载失败）
+  setInterval(async () => {
+    if (availableRoles.length === 0) {
+      console.log('角色列表为空，尝试重新加载...');
+      await loadRoles();
+    }
+  }, 30000);
 }
 
 // ============ 对话历史管理 ============
@@ -265,6 +281,77 @@ function getCurrentRoleName() {
   return role ? role.name : 'AI助手';
 }
 
+// ============ Live2D 立绘管理 ============
+
+// 获取当前角色的Live2D配置
+async function getCurrentRoleLive2DConfig() {
+  if (!currentRoleId) return null;
+  
+  try {
+    const response = await fetch(`${API_URL}/role/${currentRoleId}`);
+    const data = await response.json();
+    
+    if (data.status === 'success' && data.role.live2d && data.role.live2d.enabled) {
+      return data.role.live2d;
+    }
+  } catch (error) {
+    console.error('获取Live2D配置失败:', error);
+  }
+  
+  return null;
+}
+
+// 显示立绘
+function showLive2D(roleId, emotion = '待机') {
+  if (!roleId) {
+    live2dContainer.style.display = 'none';
+    return;
+  }
+  
+  // 构建图片路径：role/{roleId}/picture/{emotion}.png
+  const imagePath = `../role/${roleId}/picture/${emotion}.png`;
+  
+  live2dImage.src = imagePath;
+  live2dImage.onerror = () => {
+    // 如果图片加载失败，尝试加载待机图
+    if (emotion !== '待机') {
+      live2dImage.src = `../role/${roleId}/picture/待机.png`;
+    } else {
+      // 如果待机图也失败，隐藏立绘
+      live2dContainer.style.display = 'none';
+    }
+  };
+  live2dImage.onload = () => {
+    live2dContainer.style.display = 'block';
+  };
+}
+
+// 隐藏立绘
+function hideLive2D() {
+  live2dContainer.style.display = 'none';
+}
+
+// 更新立绘情绪
+async function updateLive2DEmotion(emotion) {
+  if (!currentRoleId) return;
+  
+  const config = await getCurrentRoleLive2DConfig();
+  if (!config) return;
+  
+  // 如果有指定情绪，显示对应立绘
+  if (emotion && emotion !== '待机') {
+    showLive2D(currentRoleId, emotion);
+    
+    // 5秒后回到待机状态
+    setTimeout(() => {
+      showLive2D(currentRoleId, '待机');
+    }, 5000);
+  } else {
+    // 否则显示待机立绘
+    showLive2D(currentRoleId, '待机');
+  }
+}
+
 // 格式化时间
 function formatTime(date) {
   const now = new Date();
@@ -357,7 +444,17 @@ function setupEventListeners() {
 // 检查服务器状态
 async function checkServerStatus() {
   try {
-    const response = await fetch(`${API_URL}/health`);
+    const response = await fetch(`${API_URL}/health`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    
     const data = await response.json();
     
     if (data.status === 'ok' && data.model_loaded) {
@@ -376,29 +473,86 @@ async function checkServerStatus() {
           chatHeaderModel.textContent = data.model_name + ' 模型';
         }
       }
+      
+      return true;
     } else {
       statusIndicator.classList.remove('connected');
       statusText.textContent = data.model_loaded ? '模型未加载' : '连接中...';
+      return false;
     }
   } catch (error) {
     statusIndicator.classList.remove('connected');
     statusText.textContent = '离线';
     console.error('服务器连接失败:', error);
+    return false;
   }
+}
+
+// 带重试机制的角色加载
+async function loadRolesWithRetry(maxRetries = 5, retryDelay = 3000) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      console.log(`[尝试 ${i + 1}/${maxRetries}] 加载角色列表...`);
+      const success = await loadRoles();
+      
+      if (success && availableRoles.length > 0) {
+        console.log('✓ 角色列表加载成功！');
+        return true;
+      }
+      
+      if (i < maxRetries - 1) {
+        console.log(`等待 ${retryDelay/1000} 秒后重试...`);
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
+      }
+    } catch (error) {
+      console.error(`加载角色失败 (尝试 ${i + 1}/${maxRetries}):`, error);
+      if (i < maxRetries - 1) {
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
+      }
+    }
+  }
+  
+  console.warn('⚠ 角色列表加载失败，将只显示默认助手');
+  return false;
 }
 
 // 加载角色列表
 async function loadRoles() {
   try {
-    const response = await fetch(`${API_URL}/roles`);
+    console.log('正在请求角色列表:', `${API_URL}/roles`);
+    const response = await fetch(`${API_URL}/roles`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
     const data = await response.json();
+    console.log('收到角色列表响应:', data);
     
     if (data.status === 'success') {
       availableRoles = data.roles;
+      console.log('可用角色列表:', availableRoles);
+      console.log(`  共 ${availableRoles.length} 个角色`);
+      
+      // 打印每个角色的详细信息
+      availableRoles.forEach((role, index) => {
+        console.log(`  [${index + 1}] ${role.name} (${role.id})`);
+      });
+      
       renderRoleList();
+      return true;
+    } else {
+      console.error('角色列表状态异常:', data);
+      return false;
     }
   } catch (error) {
     console.error('加载角色列表失败:', error);
+    return false;
   }
 }
 
@@ -433,7 +587,7 @@ function renderRoleList() {
 }
 
 // 选择角色
-function selectRole(roleId, roleName, clearHistory = true) {
+async function selectRole(roleId, roleName, clearHistory = true) {
   currentRoleId = roleId;
   
   // 更新UI显示
@@ -456,9 +610,15 @@ function selectRole(roleId, roleName, clearHistory = true) {
       characterAvatar.textContent = role.nickname ? role.nickname[0].toUpperCase() : role.name[0];
       characterName.textContent = role.name;
     }
+    
+    // 显示立绘（待机状态）
+    showLive2D(roleId, '待机');
   } else {
     characterAvatar.textContent = 'AI';
     characterName.textContent = 'AI助手';
+    
+    // 隐藏立绘
+    hideLive2D();
   }
   
   // 清空对话历史（切换角色时）
@@ -518,6 +678,11 @@ async function sendMessage() {
     
     // 添加 AI 回复
     addMessage(data.response, 'assistant');
+    
+    // 更新立绘情绪
+    if (data.emotion) {
+      updateLive2DEmotion(data.emotion);
+    }
     
     // 更新对话历史
     const userMessage = {
