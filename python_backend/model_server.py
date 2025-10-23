@@ -47,9 +47,16 @@ ROLE_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "role")
 # 生成参数配置
 GENERATION_CONFIG = {
     'max_tokens': 512,
-    'temperature': 0.7,
-    'top_p': 0.9,
-    'repetition_penalty': 1.1
+    'temperature': 0.5,  # 降低温度,让模型更关注上下文
+    'top_p': 0.85,       # 稍微降低,提高一致性
+    'repetition_penalty': 1.05  # 降低惩罚,避免过度避免重复
+}
+
+# 图片处理配置
+IMAGE_CONFIG = {
+    'max_width': 1280,   # 后端最大宽度（比前端稍大，作为最后保护）
+    'max_height': 1280,  # 后端最大高度
+    'max_pixels': 1280 * 1280  # 最大像素数
 }
 
 # 全局变量存储角色数据
@@ -119,6 +126,35 @@ def get_role_live2d_config(role_id):
     if role_id and role_id in roles_cache:
         return roles_cache[role_id].get('live2d', {})
     return {}
+
+def resize_image_if_needed(image):
+    """如果图片太大，调整大小以避免显存溢出"""
+    width, height = image.size
+    pixels = width * height
+    
+    logger.info(f"原始图片尺寸: {width}x{height} ({pixels:,} 像素)")
+    
+    # 检查是否需要调整大小
+    if width <= IMAGE_CONFIG['max_width'] and height <= IMAGE_CONFIG['max_height'] and pixels <= IMAGE_CONFIG['max_pixels']:
+        logger.info("图片尺寸在限制范围内，无需调整")
+        return image
+    
+    # 计算缩放比例
+    scale_w = IMAGE_CONFIG['max_width'] / width
+    scale_h = IMAGE_CONFIG['max_height'] / height
+    scale_p = (IMAGE_CONFIG['max_pixels'] / pixels) ** 0.5
+    
+    scale = min(scale_w, scale_h, scale_p)
+    
+    new_width = int(width * scale)
+    new_height = int(height * scale)
+    
+    logger.warning(f"图片过大！调整大小: {width}x{height} -> {new_width}x{new_height}")
+    
+    # 使用高质量的重采样方法
+    resized_image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+    
+    return resized_image
 
 def extract_emotion(response_text, role_id):
     """从回复文本中提取情绪标签"""
@@ -276,6 +312,14 @@ def chat():
         history = data.get('history', [])  # 对话历史
         role_id = data.get('role_id', None)  # 角色ID
         
+        # 打印调试信息
+        logger.info("=" * 50)
+        logger.info(f"收到新消息: {message[:50]}...")
+        logger.info(f"历史记录数量: {len(history)}")
+        logger.info(f"历史记录: {history}")
+        logger.info(f"角色ID: {role_id}")
+        logger.info("=" * 50)
+        
         if not message:
             return jsonify({'error': '消息不能为空'}), 400
         
@@ -289,6 +333,10 @@ def chat():
                 # 解码 base64 图片
                 image_bytes = base64.b64decode(image_data.split(',')[1] if ',' in image_data else image_data)
                 image = Image.open(io.BytesIO(image_bytes))
+                
+                # 调整图片大小（如果需要）以避免显存溢出
+                image = resize_image_if_needed(image)
+                
             except Exception as e:
                 logger.warning(f"图片处理失败: {str(e)}")
         
@@ -298,11 +346,20 @@ def chat():
         # 添加角色系统提示词（如果选择了角色）
         system_prompt = get_role_system_prompt(role_id)
         if system_prompt:
+            # 在系统提示词中添加上下文记忆要求
+            enhanced_prompt = system_prompt + "\n\n请记住我们的对话历史,并在回答时参考之前的内容。"
             messages.append({
                 "role": "system",
-                "content": system_prompt
+                "content": enhanced_prompt
             })
             logger.info(f"使用角色: {role_id}")
+        else:
+            # 如果没有角色,添加一个基础的系统提示词
+            messages.append({
+                "role": "system",
+                "content": "你是一个helpful的AI助手。请记住我们的对话历史,并在回答时参考之前的内容,保持对话的连贯性。"
+            })
+            logger.info("使用默认系统提示词")
         
         # 添加历史消息（限制历史长度以节省内存）
         for h in history[-40:]:  # 保留最近20轮对话（40条消息）
@@ -332,6 +389,16 @@ def chat():
                 "role": "user",
                 "content": message
             })
+        
+        # 打印最终发送给模型的消息列表
+        logger.info(f"最终消息列表（共{len(messages)}条）:")
+        for i, msg in enumerate(messages):
+            role = msg.get('role', 'unknown')
+            content = msg.get('content', '')
+            if isinstance(content, str):
+                logger.info(f"  [{i}] {role}: {content[:100]}...")
+            else:
+                logger.info(f"  [{i}] {role}: [复杂内容]")
         
         # 使用 Qwen3-VL 的聊天模板
         try:

@@ -140,6 +140,9 @@ function loadConversation(conversationId) {
   // 渲染对话消息
   renderConversationMessages();
   renderHistoryList();
+  
+  // 更新对话计数
+  updateConversationCounter();
 }
 
 // 删除对话
@@ -279,6 +282,27 @@ function getCurrentRoleName() {
   if (!currentRoleId) return 'AI助手';
   const role = availableRoles.find(r => r.id === currentRoleId);
   return role ? role.name : 'AI助手';
+}
+
+// 更新对话计数显示
+function updateConversationCounter() {
+  const characterInfo = document.querySelector('.character-info small');
+  if (characterInfo) {
+    const messageCount = conversationHistory.length;
+    const roundCount = Math.floor(messageCount / 2);
+    
+    // 获取模型名称(如果已经显示了的话)
+    const currentText = characterInfo.textContent;
+    const modelName = currentText.includes('模型') ? currentText.split('|')[0].trim() : 'Qwen2-VL 2B 模型';
+    
+    if (messageCount > 0) {
+      characterInfo.textContent = `${modelName} | ${roundCount}轮对话 (${messageCount}条消息)`;
+    } else {
+      characterInfo.textContent = modelName;
+    }
+    
+    console.log(`对话计数更新: ${roundCount}轮对话, ${messageCount}条消息`);
+  }
 }
 
 // ============ Live2D 立绘管理 ============
@@ -653,6 +677,12 @@ async function sendMessage() {
   const typingId = addTypingIndicator();
   
   try {
+    // 打印调试信息
+    console.log('=== 发送消息 ===');
+    console.log('当前消息:', message);
+    console.log('历史记录数量:', conversationHistory.length);
+    console.log('历史记录:', conversationHistory);
+    
     // 调用 API
     const response = await fetch(`${API_URL}/chat`, {
       method: 'POST',
@@ -672,6 +702,12 @@ async function sendMessage() {
     }
     
     const data = await response.json();
+    
+    // 打印响应信息
+    console.log('=== 收到响应 ===');
+    console.log('响应内容:', data.response);
+    console.log('情绪:', data.emotion);
+    console.log('完整响应:', data);
     
     // 移除输入中指示器
     removeTypingIndicator(typingId);
@@ -708,6 +744,9 @@ async function sendMessage() {
     
     // 保存对话到本地存储
     updateCurrentConversation();
+    
+    // 更新对话计数显示
+    updateConversationCounter();
     
   } catch (error) {
     removeTypingIndicator(typingId);
@@ -805,6 +844,9 @@ async function newConversation() {
   // 更新历史列表（取消当前对话的高亮）
   renderHistoryList();
   
+  // 更新对话计数
+  updateConversationCounter();
+  
   try {
     await fetch(`${API_URL}/reset`, { method: 'POST' });
   } catch (error) {
@@ -812,18 +854,176 @@ async function newConversation() {
   }
 }
 
+// 图片压缩配置
+const IMAGE_CONFIG = {
+  maxWidth: 1024,        // 最大宽度
+  maxHeight: 1024,       // 最大高度
+  quality: 0.85,         // JPEG 质量 (0-1)
+  maxFileSize: 5 * 1024 * 1024  // 最大文件大小 5MB
+};
+
 // 处理图片选择
-function handleImageSelect(e) {
+async function handleImageSelect(e) {
   const file = e.target.files[0];
   if (!file) return;
   
-  const reader = new FileReader();
-  reader.onload = (event) => {
-    selectedImage = event.target.result;
-    previewImage.src = selectedImage;
+  // 检查文件类型
+  if (!file.type.startsWith('image/')) {
+    alert('请选择图片文件！');
+    return;
+  }
+  
+  // 检查原始文件大小
+  const originalSize = file.size;
+  console.log(`原始文件大小: ${formatFileSize(originalSize)}`);
+  
+  // 如果文件太大，先提示用户
+  if (originalSize > IMAGE_CONFIG.maxFileSize) {
+    const confirmed = confirm(
+      `图片文件较大 (${formatFileSize(originalSize)})，将自动压缩以避免显存溢出。\n` +
+      `压缩后最大尺寸: ${IMAGE_CONFIG.maxWidth}x${IMAGE_CONFIG.maxHeight}\n\n` +
+      `是否继续？`
+    );
+    if (!confirmed) {
+      imageInput.value = '';
+      return;
+    }
+  }
+  
+  try {
+    // 压缩图片
+    const compressedImage = await compressImage(file);
+    
+    // 保存压缩后的图片
+    selectedImage = compressedImage.dataUrl;
+    previewImage.src = compressedImage.dataUrl;
     imagePreview.style.display = 'block';
-  };
-  reader.readAsDataURL(file);
+    
+    // 显示压缩信息
+    console.log(`图片压缩完成:`);
+    console.log(`  原始尺寸: ${compressedImage.originalWidth}x${compressedImage.originalHeight}`);
+    console.log(`  压缩后尺寸: ${compressedImage.width}x${compressedImage.height}`);
+    console.log(`  原始大小: ${formatFileSize(originalSize)}`);
+    console.log(`  压缩后大小: ${formatFileSize(compressedImage.size)}`);
+    console.log(`  压缩率: ${((1 - compressedImage.size / originalSize) * 100).toFixed(1)}%`);
+    
+    // 在界面上显示压缩信息
+    showImageInfo(compressedImage, originalSize);
+    
+  } catch (error) {
+    console.error('图片处理失败:', error);
+    alert('图片处理失败，请尝试其他图片');
+    imageInput.value = '';
+  }
+}
+
+// 压缩图片
+function compressImage(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    
+    reader.onerror = () => reject(new Error('文件读取失败'));
+    
+    reader.onload = (event) => {
+      const img = new Image();
+      
+      img.onerror = () => reject(new Error('图片加载失败'));
+      
+      img.onload = () => {
+        try {
+          // 记录原始尺寸
+          const originalWidth = img.width;
+          const originalHeight = img.height;
+          
+          // 计算压缩后的尺寸（保持宽高比）
+          let width = img.width;
+          let height = img.height;
+          
+          if (width > IMAGE_CONFIG.maxWidth || height > IMAGE_CONFIG.maxHeight) {
+            const ratio = Math.min(
+              IMAGE_CONFIG.maxWidth / width,
+              IMAGE_CONFIG.maxHeight / height
+            );
+            width = Math.floor(width * ratio);
+            height = Math.floor(height * ratio);
+          }
+          
+          // 创建 Canvas 进行压缩
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          
+          const ctx = canvas.getContext('2d');
+          
+          // 使用高质量的图像缩放
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          
+          // 绘制图片
+          ctx.drawImage(img, 0, 0, width, height);
+          
+          // 转换为 base64（JPEG 格式以获得更好的压缩）
+          const dataUrl = canvas.toDataURL('image/jpeg', IMAGE_CONFIG.quality);
+          
+          // 计算压缩后的大小
+          const base64Length = dataUrl.split(',')[1].length;
+          const size = Math.floor(base64Length * 0.75); // base64 大约是原始大小的 4/3
+          
+          resolve({
+            dataUrl: dataUrl,
+            width: width,
+            height: height,
+            originalWidth: originalWidth,
+            originalHeight: originalHeight,
+            size: size
+          });
+        } catch (error) {
+          reject(error);
+        }
+      };
+      
+      img.src = event.target.result;
+    };
+    
+    reader.readAsDataURL(file);
+  });
+}
+
+// 格式化文件大小
+function formatFileSize(bytes) {
+  if (bytes < 1024) {
+    return bytes + ' B';
+  } else if (bytes < 1024 * 1024) {
+    return (bytes / 1024).toFixed(1) + ' KB';
+  } else {
+    return (bytes / 1024 / 1024).toFixed(2) + ' MB';
+  }
+}
+
+// 显示图片信息
+function showImageInfo(compressedImage, originalSize) {
+  // 在预览图片下方显示信息
+  let infoDiv = document.getElementById('imageInfo');
+  if (!infoDiv) {
+    infoDiv = document.createElement('div');
+    infoDiv.id = 'imageInfo';
+    infoDiv.style.cssText = `
+      font-size: 11px;
+      color: var(--text-secondary, #999);
+      margin-top: 4px;
+      padding: 4px 8px;
+      background: rgba(0,0,0,0.2);
+      border-radius: 4px;
+    `;
+    imagePreview.appendChild(infoDiv);
+  }
+  
+  const compressionRatio = ((1 - compressedImage.size / originalSize) * 100).toFixed(0);
+  
+  infoDiv.innerHTML = `
+    <div>尺寸: ${compressedImage.originalWidth}×${compressedImage.originalHeight} → ${compressedImage.width}×${compressedImage.height}</div>
+    <div>大小: ${formatFileSize(originalSize)} → ${formatFileSize(compressedImage.size)} (压缩${compressionRatio}%)</div>
+  `;
 }
 
 // 移除图片
@@ -832,6 +1032,12 @@ function removeImage() {
   imagePreview.style.display = 'none';
   previewImage.src = '';
   imageInput.value = '';
+  
+  // 移除图片信息显示
+  const infoDiv = document.getElementById('imageInfo');
+  if (infoDiv) {
+    infoDiv.remove();
+  }
 }
 
 // 页面加载完成后初始化
